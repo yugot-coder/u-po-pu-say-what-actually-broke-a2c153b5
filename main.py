@@ -42,19 +42,32 @@ def main() -> int:
     with open(out_path, "wb") as f:
         f.write(data)
 
-    # Read-back verification: the file on disk must be exactly the
-    # constant line; exit non-zero on any difference.
+    # Read-back verification, digest-based: re-read the file from
+    # disk and hash what actually landed there, then compare that
+    # digest against the digest of the source constant's bytes. Any
+    # difference (truncation, partial write, encoding drift) exits
+    # non-zero. This is an explicit comparison plus SystemExit, not
+    # an assert, so the check still runs under `python -O`.
     with open(out_path, "rb") as f:
         written = f.read()
+    expected_digest = hashlib.sha256(data).hexdigest()
+    actual_digest = hashlib.sha256(written).hexdigest()
+    if actual_digest != expected_digest:
+        raise SystemExit(
+            "read-back digest mismatch: wrote sha256 %s, read back %s"
+            % (expected_digest, actual_digest)
+        )
+
+    # The digest match already proves byte equality; these checks
+    # restate the gate on the decoded text for a clearer failure
+    # message if the constant itself is ever edited badly.
     text = written.decode("utf-8")  # raises on invalid UTF-8
-    if text != LINE:
-        raise SystemExit("read-back mismatch: file differs from the entry line")
     if not (1 <= len(text) <= MAX_CHARS):
         raise SystemExit("read-back length %d out of range" % len(text))
     if text.strip() == "" or "\n" in text or "\r" in text:
         raise SystemExit("read-back is not a single non-blank line")
 
-    digest = hashlib.sha256(written).hexdigest()
+    digest = actual_digest
     print("wrote %s (%d chars, sha256 %s)" % (out_path, len(text), digest))
     return 0
 
